@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 BLE Control with Chart.js</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <!-- Chart.js Library -->
+</head>
+<body>
+    <h1>ESP32 BLE Control</h1>
+    <button id="connectButton">Connect to a Bluetooth Device</button>
+    <button id="sendButton" disabled>Send Data</button>
+    <input type="text" id="message" placeholder="Enter message to send" disabled>
+    <p id="status">Status: Not connected</p>
+    <p id="receivedData">Received Data: None</p>
+
+    <canvas id="scatterChart" width="800" height="200"></canvas> <!-- Chart.js Scatter Plot Container -->
+
+    <script>
+        let device;
+        let characteristic;
+        let xData = [];
+        let yData = [];
+
+        // Initialize Chart.js scatter chart
+        const ctx = document.getElementById('scatterChart').getContext('2d');
+        const scatterChart = new Chart(ctx, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'ESP32 Data',
+                    data: [],  // Initially empty
+                    backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                }]
+            },
+            options: {
+                scales: {
+                    x: {
+                        type: 'linear',
+                        position: 'bottom',
+                        min: 0,  // Set fixed minimum value for x-axis
+                        max: 100,  // Set fixed maximum value for x-axis
+                        title: { display: true, text: 'X-axis' }
+                    },
+                    y: {
+                        min: -1,  // Set fixed minimum value for y-axis
+                        max: 1,  // Set fixed maximum value for y-axis
+                        title: { display: true, text: 'Y-axis' }
+                    }
+                }
+            }
+        });
+
+        // Update scatter chart with new data
+        function updateChart(x, y) {
+            xData.push(x);
+            yData.push(y);
+
+            // Update the chart data
+            scatterChart.data.datasets[0].data.push({ x: x, y: y });
+            scatterChart.update();
+        }
+
+        // Connect Button Click Event
+        document.getElementById('connectButton').addEventListener('click', async () => {
+            try {
+                // Request device without filtering, shows a list of all devices
+                device = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true, // This allows searching for all available devices
+                    optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb'] // Replace with correct service UUID if necessary
+                });
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb'); // Replace with correct service UUID
+                characteristic = await service.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb'); // Replace with correct characteristic UUID
+
+                document.getElementById('status').textContent = 'Status: Connected to ' + device.name;
+                document.getElementById('sendButton').disabled = false;
+                document.getElementById('message').disabled = false;
+
+                // Listen for notifications
+                characteristic.addEventListener('characteristicvaluechanged', handleNotifications);
+                await characteristic.startNotifications();
+
+                console.log('Connected to device:', device.name);
+            } catch (error) {
+                console.error('Error connecting to device:', error);
+                document.getElementById('status').textContent = 'Status: Connection failed';
+            }
+        });
+
+        // Send Data Button Click Event
+        document.getElementById('sendButton').addEventListener('click', async () => {
+            const message = document.getElementById('message').value;
+            if (!message) {
+                alert('Please enter a message');
+                return;
+            }
+
+            const encoder = new TextEncoder();
+            try {
+                await characteristic.writeValue(encoder.encode(message));
+                console.log('Sent:', message);
+            } catch (error) {
+                console.error('Error sending message:', error);
+            }
+        });
+
+        // Handle Notifications from ESP32
+        function handleNotifications(event) {
+            if (event && event.target && event.target.value) {
+                const decoder = new TextDecoder();
+                const receivedData = decoder.decode(event.target.value);
+                document.getElementById('receivedData').textContent = 'Received Data: ' + receivedData;
+                console.log('Received:', receivedData);
+
+                // Assuming receivedData is in the format 'x,y' (e.g., '12,34')
+                const [x, y] = receivedData.split(',').map(Number);
+                if (!isNaN(x) && !isNaN(y)) {
+                    updateChart(x, y); // Update the chart with received data
+                } else {
+                    console.error('Received data is not in expected format:', receivedData);
+                }
+            } else {
+                console.error('Notification event is missing expected properties:', event);
+            }
+        }
+    </script>
+</body>
+</html>
